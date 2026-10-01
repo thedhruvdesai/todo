@@ -36,6 +36,8 @@ Durations accept `h`, `hr`, `hours`, `m`, `min`, `1h30m`, `1h 30m`. Category com
 
 **Organising** — drag tasks to reorder or move between days and the **Someday** backlog. Each task's `•••` menu (works on touch) sets duration, category, moves, duplicates or deletes (with undo). Click a title to edit inline.
 
+**Undo / redo** — every change (push, move, delete, tick, edit, category or target change, import, clear) can be undone: header ↶ button, the *Undo* button on the pop-up after a change, or `⌘Z`. Up to 80 steps; rapid edits like typing a name merge into one step.
+
 **Push forward** — header `↪` menu: roll overdue tasks to today, or push this week's unfinished to next week. Hover a day for a per-day push button.
 
 **Month drawer** — collapsed: month summary + daily sparkline. Expanded (`M`): heat-tinted calendar; click a day to review its completed tasks, time and category split.
@@ -52,6 +54,8 @@ Durations accept `h`, `hr`, `hours`, `m`, `min`, `1h30m`, `1h 30m`. Category com
 | `T` | Jump to this week |
 | `←` / `→` | Previous / next week |
 | `⌘K` / `Ctrl+K` | Search & quick add |
+| `⌘Z` / `Ctrl+Z` | Undo last change |
+| `⌘⇧Z` / `Ctrl+Y` | Redo |
 | `A` | Analytics |
 | `M` | Month drawer |
 | `S` | Someday backlog |

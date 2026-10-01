@@ -12,6 +12,8 @@ import {
   Sun,
   CalendarClock,
   ArrowRight,
+  Undo2,
+  Redo2,
 } from 'lucide-react';
 import { fmtHours } from '../utils/helpers.js';
 import { IconButton, Kbd, Popover } from './ui.jsx';
@@ -34,6 +36,10 @@ export default function Header({
   onRollOverdue,
   onPushWeek,
   overdueCount,
+  canUndo,
+  canRedo,
+  onUndo,
+  onRedo,
 }) {
   const [pushMenu, setPushMenu] = useState(null);
   const monthAnchor = addDays(weekStart, 3);
@@ -74,14 +80,14 @@ export default function Header({
 
       <div className="flex w-full items-center justify-between sm:w-auto sm:justify-end sm:gap-1">
         <div className="mr-auto flex sm:mr-1 items-center rounded-xl border border-rule p-0.5 dark:border-white/10">
-          <IconButton label="Previous week (←)" onClick={onPrev} className="!h-8 !w-8">
+          <IconButton label="Previous week (←)" onClick={onPrev} className="!h-8 !w-8 max-sm:!w-7">
             <ChevronLeft className="h-4 w-4" />
           </IconButton>
           <button
             type="button"
             onClick={onToday}
             title="Go to today (T)"
-            className={`h-8 rounded-lg px-3 text-[12.5px] font-medium transition-colors ${
+            className={`h-8 rounded-lg px-2 text-[12.5px] sm:px-3 font-medium transition-colors ${
               weekOffset === 0
                 ? 'text-ink-400 dark:text-stone-500'
                 : 'text-ink-900 hover:bg-black/5 dark:text-stone-100 dark:hover:bg-white/10'
@@ -89,16 +95,30 @@ export default function Header({
           >
             Today
           </button>
-          <IconButton label="Next week (→)" onClick={onNext} className="!h-8 !w-8">
+          <IconButton label="Next week (→)" onClick={onNext} className="!h-8 !w-8 max-sm:!w-7">
             <ChevronRight className="h-4 w-4" />
           </IconButton>
         </div>
 
-        <IconButton label="Search & quick add (⌘K)" onClick={onSearch}>
+        <IconButton
+          label="Undo (⌘Z)"
+          onClick={onUndo}
+          disabled={!canUndo}
+          className="max-sm:!h-8 max-sm:!w-[30px] disabled:pointer-events-none disabled:opacity-30"
+        >
+          <Undo2 className="h-4 w-4" />
+        </IconButton>
+        {canRedo && (
+          <IconButton label="Redo (⌘⇧Z)" onClick={onRedo} className="hidden animate-fade sm:inline-flex">
+            <Redo2 className="h-4 w-4" />
+          </IconButton>
+        )}
+        <IconButton className="max-sm:!h-8 max-sm:!w-[30px]" label="Search & quick add (⌘K)" onClick={onSearch}>
           <Search className="h-4 w-4" />
         </IconButton>
         <div className="relative">
           <IconButton
+            className="max-sm:!h-8 max-sm:!w-[30px]"
             label="Push unfinished tasks"
             onClick={(e) => setPushMenu(pushMenu ? null : e.currentTarget)}
             active={!!pushMenu}
@@ -109,16 +129,16 @@ export default function Header({
             <span className="pointer-events-none absolute right-1 top-1 h-1.5 w-1.5 rounded-full bg-accent" />
           )}
         </div>
-        <IconButton label="Analytics (A)" onClick={onAnalytics}>
+        <IconButton className="max-sm:!h-8 max-sm:!w-[30px]" label="Analytics (A)" onClick={onAnalytics}>
           <BarChart3 className="h-4 w-4" />
         </IconButton>
-        <IconButton label="Someday backlog (S)" onClick={onSomeday} active={somedayOpen}>
+        <IconButton className="max-sm:!h-8 max-sm:!w-[30px]" label="Someday backlog (S)" onClick={onSomeday} active={somedayOpen}>
           <Inbox className="h-4 w-4" />
         </IconButton>
-        <IconButton label="Toggle theme (D)" onClick={onTheme}>
+        <IconButton className="max-sm:!h-8 max-sm:!w-[30px]" label="Toggle theme (D)" onClick={onTheme}>
           {theme === 'dark' ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
         </IconButton>
-        <IconButton label="Settings" onClick={onSettings}>
+        <IconButton className="max-sm:!h-8 max-sm:!w-[30px]" label="Settings" onClick={onSettings}>
           <Settings2 className="h-4 w-4" />
         </IconButton>
       </div>

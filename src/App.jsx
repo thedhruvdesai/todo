@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { addDays } from 'date-fns';
+import { addDays, format } from 'date-fns';
 import Header from './components/Header.jsx';
 import MonthDrawer from './components/MonthDrawer.jsx';
 import WeekView from './components/WeekView.jsx';
@@ -80,10 +80,81 @@ export default function App() {
   }, []);
 
   /* ---------------------------------------------------------------- */
+  /* Undo / redo history                                               */
+  /* ---------------------------------------------------------------- */
+  // Snapshots cover the data (tasks, categories, targets) — not view state like week or theme.
+  const pastRef = useRef([]);
+  const futureRef = useRef([]);
+  const lastCommit = useRef({ key: null, at: 0 });
+  const [history, setHistory] = useState({ undo: 0, redo: 0 });
+  const syncHistory = useCallback(
+    () => setHistory({ undo: pastRef.current.length, redo: futureRef.current.length }),
+    [],
+  );
+  const snap = (s) => ({ tasks: s.tasks, categories: s.categories, targets: s.targets });
+  const applySnap = useCallback(
+    (d) => {
+      stateRef.current = { ...stateRef.current, ...d };
+      setState((s) => ({ ...s, ...d }));
+    },
+    [setState],
+  );
+
+  /** Apply a data change and record it. Rapid edits sharing `key` (typing, ± clicks) merge into one step. */
+  const commit = useCallback(
+    (fn, key = null) => {
+      const prev = stateRef.current;
+      const next = fn(prev);
+      if (!next || next === prev) return;
+      const now = Date.now();
+      const merge = key && lastCommit.current.key === key && now - lastCommit.current.at < 1500;
+      if (!merge) {
+        pastRef.current = [...pastRef.current.slice(-79), snap(prev)];
+      }
+      futureRef.current = [];
+      lastCommit.current = { key, at: now };
+      applySnap(snap(next));
+      syncHistory();
+    },
+    [applySnap, syncHistory],
+  );
+
+  const undo = useCallback(() => {
+    const prev = pastRef.current.pop();
+    if (!prev) {
+      notify('Nothing to undo');
+      return;
+    }
+    futureRef.current.push(snap(stateRef.current));
+    lastCommit.current = { key: null, at: 0 };
+    applySnap(prev);
+    syncHistory();
+    notify('Undone', { label: 'Redo', fn: () => redoRef.current() });
+  }, [applySnap, syncHistory, notify]);
+
+  const redo = useCallback(() => {
+    const next = futureRef.current.pop();
+    if (!next) {
+      notify('Nothing to redo');
+      return;
+    }
+    pastRef.current.push(snap(stateRef.current));
+    lastCommit.current = { key: null, at: 0 };
+    applySnap(next);
+    syncHistory();
+    notify('Redone', { label: 'Undo', fn: () => undoRef.current() });
+  }, [applySnap, syncHistory, notify]);
+  const undoRef = useRef(undo);
+  const redoRef = useRef(redo);
+  undoRef.current = undo;
+  redoRef.current = redo;
+
+  /* ---------------------------------------------------------------- */
   /* Actions                                                           */
   /* ---------------------------------------------------------------- */
   const actions = useMemo(() => {
-    const setTasks = (fn) => setState((s) => ({ ...s, tasks: fn(s.tasks) }));
+    const setTasks = (fn, key) => commit((s) => ({ ...s, tasks: fn(s.tasks) }), key);
+    const withUndo = (msg) => notify(msg, { label: 'Undo', fn: () => undoRef.current() });
     const nextOrder = (list, date) => {
       const same = list.filter((t) => t.date === date);
       return same.length ? Math.max(...same.map((t) => t.order ?? 0)) + 1 : 0;
@@ -98,7 +169,7 @@ export default function App() {
       setTasks((list) =>
         list.map((t) => (ids.has(t.id) ? { ...t, date: mapDate(t), order: (t.order ?? 0) + 1000 } : t)),
       );
-      notify(`${movers.length} task${movers.length > 1 ? 's' : ''} ${label}`);
+      withUndo(`${movers.length} task${movers.length > 1 ? 's' : ''} ${label}`);
     };
 
     return {
@@ -115,16 +186,15 @@ export default function App() {
         return id;
       },
       update(id, patch) {
-        setTasks((list) => list.map((t) => (t.id === id ? { ...t, ...patch } : t)));
+        setTasks((list) => list.map((t) => (t.id === id ? { ...t, ...patch } : t)), `update:${id}:${Object.keys(patch).join()}`);
       },
       toggle(id) {
         setTasks((list) => list.map((t) => (t.id === id ? { ...t, done: !t.done } : t)));
       },
       remove(id) {
-        const task = stateRef.current.tasks.find((t) => t.id === id);
-        if (!task) return;
+        if (!stateRef.current.tasks.some((t) => t.id === id)) return;
         setTasks((list) => list.filter((t) => t.id !== id));
-        notify('Task deleted', { label: 'Undo', fn: () => setTasks((list) => [...list, task]) });
+        withUndo('Task deleted');
       },
       duplicate(id) {
         setTasks((list) => {
@@ -135,6 +205,7 @@ export default function App() {
       },
       move(id, date, beforeId) {
         const target = date ?? null;
+        const task = stateRef.current.tasks.find((t) => t.id === id);
         setTasks((list) => {
           const task = list.find((t) => t.id === id);
           if (!task) return list;
@@ -148,6 +219,9 @@ export default function App() {
             orders.has(t.id) ? { ...t, order: orders.get(t.id) } : t,
           );
         });
+        if (task && task.date !== target) {
+          withUndo(target ? `Moved to ${format(fromKey(target), 'EEE d MMM')}` : 'Moved to Someday');
+        }
       },
       pushDay(key) {
         relocate((t) => t.date === key && !t.done, (t) => shiftKey(t.date, 1), 'pushed to the next day');
@@ -162,29 +236,33 @@ export default function App() {
       },
       addCategory({ name, color }) {
         const id = `${name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || 'cat'}-${uid().slice(0, 4)}`;
-        setState((s) => ({
+        commit((s) => ({
           ...s,
           categories: [...s.categories, { id, name, short: name.split(/[\s(/]/)[0] || name, color, keywords: [] }],
         }));
-        notify(`Category “${name}” added`);
+        withUndo(`Category “${name}” added`);
       },
       updateCategory(id, patch) {
-        setState((s) => ({
-          ...s,
-          categories: s.categories.map((c) =>
-            c.id === id ? { ...c, ...patch, ...(patch.name !== undefined && !c.builtin ? { short: patch.name.split(/[\s(/]/)[0] || patch.name } : {}) } : c,
-          ),
-        }));
+        commit(
+          (s) => ({
+            ...s,
+            categories: s.categories.map((c) =>
+              c.id === id ? { ...c, ...patch, ...(patch.name !== undefined && !c.builtin ? { short: patch.name.split(/[\s(/]/)[0] || patch.name } : {}) } : c,
+            ),
+          }),
+          `cat:${id}:${Object.keys(patch).join()}`,
+        );
       },
       removeCategory(id) {
-        setState((s) => ({
+        commit((s) => ({
           ...s,
           categories: s.categories.filter((c) => c.id !== id),
           tasks: s.tasks.map((t) => (t.category === id ? { ...t, category: null } : t)),
         }));
+        withUndo('Category deleted');
       },
       setTargets(patch) {
-        setState((s) => ({ ...s, targets: { ...s.targets, ...patch } }));
+        commit((s) => ({ ...s, targets: { ...s.targets, ...patch } }), `targets:${JSON.stringify(Object.keys(patch.weekly || patch))}`);
       },
       setTheme(next) {
         setState((s) => ({ ...s, theme: next }));
@@ -198,8 +276,8 @@ export default function App() {
         reader.onload = () => {
           try {
             const next = normalizeState(JSON.parse(String(reader.result)));
-            setState(next);
-            notify(`Imported ${next.tasks.length} tasks`);
+            commit((s) => ({ ...s, tasks: next.tasks, categories: next.categories, targets: next.targets }));
+            withUndo(`Imported ${next.tasks.length} tasks`);
           } catch {
             notify('That file isn’t a valid Paperweek backup');
           }
@@ -207,15 +285,16 @@ export default function App() {
         reader.readAsText(file);
       },
       resetDemo() {
-        setState((s) => ({ ...s, tasks: buildMockTasks(), weekOffset: 0 }));
-        notify('Demo data loaded');
+        commit((s) => ({ ...s, tasks: buildMockTasks() }));
+        setWeekOffset(0);
+        withUndo('Demo data loaded');
       },
       clearAll() {
-        setState((s) => ({ ...createEmptyState(s.theme), categories: s.categories, targets: s.targets }));
-        notify('All tasks cleared');
+        commit((s) => ({ ...s, tasks: [] }));
+        withUndo('All tasks cleared');
       },
     };
-  }, [setState, notify, dayKeys]);
+  }, [commit, setState, setWeekOffset, notify, dayKeys]);
 
   const jumpToTask = useCallback(
     (t) => {
@@ -239,6 +318,21 @@ export default function App() {
       }
       const el = e.target;
       const typing = el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.tagName === 'SELECT' || el.isContentEditable);
+      // Ctrl/⌘+Z undo, Ctrl/⌘+Shift+Z or Ctrl+Y redo (inputs keep their own text undo).
+      if ((e.metaKey || e.ctrlKey) && !e.altKey && !typing) {
+        const k = e.key.toLowerCase();
+        if (k === 'z') {
+          e.preventDefault();
+          if (e.shiftKey) redo();
+          else undo();
+          return;
+        }
+        if (k === 'y') {
+          e.preventDefault();
+          redo();
+          return;
+        }
+      }
       if (typing || e.metaKey || e.ctrlKey || e.altKey || overlayOpen) return;
       switch (e.key) {
         case 'n':
@@ -281,7 +375,7 @@ export default function App() {
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [overlayOpen, setWeekOffset, setState]);
+  }, [overlayOpen, setWeekOffset, setState, undo, redo]);
 
   /* ---------------------------------------------------------------- */
   /* Derived                                                           */
@@ -317,6 +411,10 @@ export default function App() {
         onRollOverdue={actions.rollOverdue}
         onPushWeek={actions.pushWeek}
         overdueCount={overdueCount}
+        canUndo={history.undo > 0}
+        canRedo={history.redo > 0}
+        onUndo={undo}
+        onRedo={redo}
       />
 
       <MonthDrawer
@@ -353,6 +451,7 @@ export default function App() {
         <span className="flex items-center gap-1.5"><Kbd>T</Kbd> today</span>
         <span className="flex items-center gap-1.5"><Kbd>←</Kbd><Kbd>→</Kbd> weeks</span>
         <span className="flex items-center gap-1.5"><Kbd>⌘K</Kbd> search & add</span>
+        <span className="flex items-center gap-1.5"><Kbd>⌘Z</Kbd> undo</span>
         <span className="flex items-center gap-1.5"><Kbd>A</Kbd> analytics</span>
         <span className="flex items-center gap-1.5"><Kbd>M</Kbd> month</span>
         <span className="flex items-center gap-1.5"><Kbd>S</Kbd> someday</span>
